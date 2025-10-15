@@ -1,5 +1,5 @@
 
-// workers with channels per thread example
+// workers with channels example
 
 const std = @import("std");
 const print = std.debug.print;
@@ -25,16 +25,16 @@ fn worker(input_ch: *Channel(u32), output_ch: *Channel(u32)) void{
       const cube = num * num * num;
       output_ch.push(cube) catch unreachable;
     }else{
-      std.time.sleep(std.time.ns_per_ms * 10);
+      std.time.sleep(std.time.ns_per_ms * 10); // 10 ms
     }
     
     var seed: u64 = undefined;
     std.crypto.random.bytes(std.mem.asBytes(&seed));
     var prng = std.Random.DefaultPrng.init(seed);
     const rand = prng.random();
-    const rand_delay = randomInteger(&rand, 1, 5);
+    //const rand_delay = randomInteger(&rand, 1, 5);
+    const rand_delay = randomInteger(&rand, 10, 20);
     std.time.sleep(rand_delay * std.time.ns_per_s);
-    
   }
 }
 
@@ -43,77 +43,62 @@ pub fn main() !void{
   defer _ = gpa.deinit();
   const allocator = gpa.allocator();
   
-  // channels refs array - input + output per worker
+  // channels refs array - input per worker + output
   var input_channels: [WORKER_COUNT]*Channel(u32) = undefined;
-  var output_channels: [WORKER_COUNT]*Channel(u32) = undefined;
+  const output_channel: *Channel(u32) = try Channel(u32).init(allocator);
   
-  // channels init
+  // input channels init
   for(&input_channels) |*ch|{
-    ch.* = try Channel(u32).init(allocator);
-  }
-  for(&output_channels) |*ch|{
     ch.* = try Channel(u32).init(allocator);
   }
   
   // channels deinit
   defer{
     for(input_channels) |ch|{ ch.deinit(); }
-    for(output_channels) |ch|{ ch.deinit(); }
+    output_channel.*.deinit();
   }
   
-  // run workers in threads
-  var threads: [WORKER_COUNT]std.Thread = undefined;
-  for(&threads, 0..) |*thread, i|{
-    thread.* = try std.Thread.spawn(.{}, worker, .{ input_channels[i], output_channels[i] });
+  // run workers, but every channel already is a thread
+  for(0 .. WORKER_COUNT) |i|{
+    _ = try Task(worker).launch(allocator, .{ input_channels[i], output_channel }); // run worker
+    input_channels[i].push( @as(u32, @intCast(i + 1) ) ) catch unreachable; // tasks to worker
   }
   
-  const inputs = [_]u32{ 2, 3, 4, 5, 6 };
-  
-  // tasks to workers
-  var worker_index: usize = 0;
-  for(inputs) |num|{
-    input_channels[worker_index].push(num) catch unreachable;
-    worker_index = (worker_index + 1) % WORKER_COUNT;
+  // collect results (must be inputs.len count)
+  var received: usize = 0;
+  while(received < WORKER_COUNT){
+    if( output_channel.*.pop() ) |result|{
+      print("Receive {d}\n", .{result});
+      received += 1;
+    }else{
+      std.time.sleep(std.time.ns_per_ms * 5);
+    }
   }
+  
+  //std.time.sleep(std.time.ns_per_s * 30); // 30 sec
   
   // stop - sentinel for workers
   for(&input_channels) |*ch|{
     ch.*.push(0) catch unreachable;
   }
   
-  // collect results (must be inputs.len count)
-  var received: usize = 0;
-  while(received < inputs.len) : (received += 1){
-    var found = false;
-    while(!found){
-      for(&output_channels) |*ch|{
-        if( ch.*.pop() ) |result|{
-          print("Receive {d}\n", .{result});
-          found = true;
-          break;
-        }
-      }
-      if(!found){
-        std.time.sleep(std.time.ns_per_ms * 5);
-      }
-    }
-  }
-  
-  // waiting all threads ends
-  for(&threads) |*thread|{
-    thread.join();
-  }
-  
   print("All done.\n", .{});
 }
 
 
+// this code creates 11 threads (tasks are executed in parallel)
+
 // zig build-exe ./src/test3.zig -O ReleaseFast -femit-bin=test3
 // ./test3
-//Receive 27
+//Receive 1
 //Receive 64
-//Receive 216
-//Receive 125
+//Receive 27
 //Receive 8
+//Receive 125
+//Receive 216
+//Receive 343
+//Receive 512
+//Receive 729
+//Receive 1000
 //All done.
 

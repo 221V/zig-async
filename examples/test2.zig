@@ -80,6 +80,8 @@ pub fn main() !void{
 }
 
 
+// this code creates 2 threads (main + 1 worker with task) (tasks are executed sequentially)
+
 // zig build-exe ./src/test2.zig -O ReleaseFast -femit-bin=test2
 // ./test2
 //Receive 8

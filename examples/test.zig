@@ -50,6 +50,8 @@ pub fn main() !void{
 }
 
 
+// this code creates 11 threads (tasks are executed in parallel)
+
 // zig build-exe ./src/test.zig -O ReleaseFast -femit-bin=test
 // ./test
 //10 -> 100
